@@ -37,7 +37,8 @@ fs     = None
 @app.on_event("startup")
 async def startup():
     global client, db, fs
-    client = AsyncIOMotorClient(MONGO_URL)
+    # ÖNEMLİ: <db_password> yerine KENDİ şifreni yazmayı unutma!
+client = AsyncIOMotorClient("mongodb+srv://cihataksoy16_db_user:BURAYA_SIFRENI_YAZ@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123")
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
     # Ensure index
