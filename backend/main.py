@@ -12,7 +12,7 @@ from bson import ObjectId
 import uvicorn
 
 # -- Config --------------------------------------------------------------------
-DB_NAME         = "sapsaltavsan"
+DB_NAME         = "sapsalTavsan"
 USER_PASSWORD   = "280126"
 ADMIN_PASSWORD  = "ec280126"
 # Yıldönümü: 23 Ocak 2026
@@ -38,7 +38,7 @@ fs     = None
 async def startup():
     global client, db, fs
     # MongoDB Atlas Bağlantısı
-    uri = "mongodb+srv://cihataksoy16_db_user:EsmaCihat2026@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
+    uri = "mongodb+srv://cihataksoy16_db_user:EsmaCihat2026@cihat123.nxaxw7t.mongodb.net/sapsalTavsan?retryWrites=true&w=majority&appName=Cihat123"
     client = AsyncIOMotorClient(uri)
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
