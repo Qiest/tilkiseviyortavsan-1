@@ -11,14 +11,14 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 import uvicorn
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# -- Config --------------------------------------------------------------------
 DB_NAME         = "sapsaltavsan"
 USER_PASSWORD   = "280126"
 ADMIN_PASSWORD  = "ec280126"
-# Yıldönümü Tarihiniz: 23 Ocak 2026 (İlişkiniz bu tarihte başladı)
+# Yıldönümü: 23 Ocak 2026
 ANNIVERSARY     = datetime(2026, 1, 23, 0, 0, 0, tzinfo=timezone.utc)
 
-# ── App & CORS ─────────────────────────────────────────────────────────────────
+# -- App & CORS -----------------------------------------------------------------
 app = FastAPI(title="Şapşal Tavşan API")
 
 app.add_middleware(
@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── DB Helpers ─────────────────────────────────────────────────────────────────
+# -- DB Helpers -----------------------------------------------------------------
 client: Optional[AsyncIOMotorClient] = None
 db     = None
 fs     = None
@@ -37,13 +37,12 @@ fs     = None
 @app.on_event("startup")
 async def startup():
     global client, db, fs
-    # MongoDB Atlas Bağlantısı (Hizalama Tamam!)
-   # ÖRNEK (Yeni şifreni buraya yaz):
-uri = "mongodb+srv://cihataksoy16_db_user:SapsalTavsan123@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
+    # MongoDB Atlas Bağlantısı
+    uri = "mongodb+srv://cihataksoy16_db_user:280126@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
     client = AsyncIOMotorClient(uri)
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
-    # Index oluşturma (Tarihe göre sıralama için)
+    # Index oluşturma
     await db.memories.create_index([("date", -1)])
 
 @app.on_event("shutdown")
@@ -51,7 +50,7 @@ async def shutdown():
     if client:
         client.close()
 
-# ── Auth ───────────────────────────────────────────────────────────────────────
+# -- Auth -----------------------------------------------------------------------
 @app.post("/api/auth/login")
 async def login(request: Request):
     body = await request.json()
@@ -62,7 +61,7 @@ async def login(request: Request):
         return {"role": "user",  "ok": True}
     raise HTTPException(status_code=401, detail="Yanlış şifre 💔")
 
-# ── Anniversary Counter ────────────────────────────────────────────────────────
+# -- Anniversary Counter --------------------------------------------------------
 @app.get("/api/anniversary")
 async def anniversary():
     now   = datetime.now(timezone.utc)
@@ -74,7 +73,7 @@ async def anniversary():
     seconds = total_seconds % 60
     return {"days": days, "hours": hours, "minutes": minutes, "seconds": seconds}
 
-# ── Memories ───────────────────────────────────────────────────────────────────
+# -- Memories -------------------------------------------------------------------
 @app.get("/api/memories")
 async def list_memories():
     cursor = db.memories.find().sort("date", -1)
@@ -97,13 +96,11 @@ async def create_memory(
 ):
     content   = await file.read()
     file_type = "video" if file.content_type and "video" in file.content_type else "image"
-
     file_id = await fs.upload_from_stream(
         file.filename,
         io.BytesIO(content),
         metadata={"contentType": file.content_type},
     )
-
     doc = {
         "caption":  caption,
         "date":     date or datetime.now(timezone.utc).isoformat(),
@@ -126,21 +123,18 @@ async def delete_memory(memory_id: str):
     await db.memories.delete_one({"_id": ObjectId(memory_id)})
     return {"ok": True}
 
-# ── Media Streaming ────────────────────────────────────────────────────────────
+# -- Media Streaming ------------------------------------------------------------
 @app.get("/api/media/{file_id}")
 async def stream_media(file_id: str, request: Request):
     try:
         oid = ObjectId(file_id)
     except Exception:
         raise HTTPException(400, "Geçersiz dosya ID")
-
     file_doc = await db["fs.files"].find_one({"_id": oid})
     if not file_doc:
         raise HTTPException(404, "Dosya bulunamadı")
-
     content_type = (file_doc.get("metadata") or {}).get("contentType", "application/octet-stream")
     file_length  = file_doc["length"]
-
     range_header = request.headers.get("range")
     if range_header and "video" in content_type:
         range_val   = range_header.strip().replace("bytes=", "")
@@ -149,7 +143,6 @@ async def stream_media(file_id: str, request: Request):
         end   = int(end_str)   if end_str   else file_length - 1
         end   = min(end, file_length - 1)
         chunk_size = end - start + 1
-
         async def range_generator():
             stream = await fs.open_download_stream(oid)
             skipped = 0
@@ -167,7 +160,6 @@ async def stream_media(file_id: str, request: Request):
                 yield data
                 if chunk_size <= 0:
                     break
-
         return StreamingResponse(
             range_generator(),
             status_code=206,
@@ -178,12 +170,10 @@ async def stream_media(file_id: str, request: Request):
                 "Content-Length": str(end - start + 1),
             },
         )
-
     async def full_generator():
         stream = await fs.open_download_stream(oid)
         async for chunk in stream:
             yield chunk
-
     return StreamingResponse(
         full_generator(),
         media_type=content_type,
@@ -193,6 +183,6 @@ async def stream_media(file_id: str, request: Request):
         },
     )
 
-# ── Run ────────────────────────────────────────────────────────────────────────
+# -- Run ------------------------------------------------------------------------
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000)
