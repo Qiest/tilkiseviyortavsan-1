@@ -38,7 +38,7 @@ fs     = None
 async def startup():
     global client, db, fs
     # MongoDB Atlas Bağlantısı
-    uri = "mongodb+srv://cihataksoy16_db_user:280126@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
+     uri = "mongodb+srv://cihataksoy16_db_user:EsmaCihat2026@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
     client = AsyncIOMotorClient(uri)
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
