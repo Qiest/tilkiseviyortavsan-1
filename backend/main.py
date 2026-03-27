@@ -12,18 +12,18 @@ from bson import ObjectId
 import uvicorn
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MONGO_URL       = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME         = "sapsalTavsan"
+DB_NAME         = "sapsaltavsan"
 USER_PASSWORD   = "280126"
 ADMIN_PASSWORD  = "ec280126"
-ANNIVERSARY     = datetime(2026, 1, 28, 0, 0, 0, tzinfo=timezone.utc)
+# Yıldönümü Tarihiniz: 23 Ocak 2026 (İlişkiniz bu tarihte başladı)
+ANNIVERSARY     = datetime(2026, 1, 23, 0, 0, 0, tzinfo=timezone.utc)
 
 # ── App & CORS ─────────────────────────────────────────────────────────────────
 app = FastAPI(title="Şapşal Tavşan API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Tüm dünyadan (Netlify dahil) gelen isteklere izin ver!
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,11 +37,12 @@ fs     = None
 @app.on_event("startup")
 async def startup():
     global client, db, fs
-    # ÖNEMLİ: <db_password> yerine KENDİ şifreni yazmayı unutma!
-client = AsyncIOMotorClient("mongodb+srv://cihataksoy16_db_user:BURAYA_SIFRENI_YAZ@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123")
+    # MongoDB Atlas Bağlantısı (Hizalama Tamam!)
+    uri = "mongodb+srv://cihataksoy16_db_user:280126@cihat123.nxaxw7t.mongodb.net/sapsaltavsan?retryWrites=true&w=majority&appName=Cihat123"
+    client = AsyncIOMotorClient(uri)
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
-    # Ensure index
+    # Index oluşturma (Tarihe göre sıralama için)
     await db.memories.create_index([("date", -1)])
 
 @app.on_event("shutdown")
@@ -58,7 +59,7 @@ async def login(request: Request):
         return {"role": "admin", "ok": True}
     if password == USER_PASSWORD:
         return {"role": "user",  "ok": True}
-    raise HTTPException(status_code=401, detail="Wrong password 💔")
+    raise HTTPException(status_code=401, detail="Yanlış şifre 💔")
 
 # ── Anniversary Counter ────────────────────────────────────────────────────────
 @app.get("/api/anniversary")
@@ -96,7 +97,6 @@ async def create_memory(
     content   = await file.read()
     file_type = "video" if file.content_type and "video" in file.content_type else "image"
 
-    # Store file in GridFS
     file_id = await fs.upload_from_stream(
         file.filename,
         io.BytesIO(content),
@@ -117,8 +117,7 @@ async def create_memory(
 async def delete_memory(memory_id: str):
     doc = await db.memories.find_one({"_id": ObjectId(memory_id)})
     if not doc:
-        raise HTTPException(404, "Memory not found")
-    # Delete GridFS file
+        raise HTTPException(404, "Anı bulunamadı")
     try:
         await fs.delete(doc["fileId"])
     except Exception:
@@ -132,17 +131,15 @@ async def stream_media(file_id: str, request: Request):
     try:
         oid = ObjectId(file_id)
     except Exception:
-        raise HTTPException(400, "Invalid file id")
+        raise HTTPException(400, "Geçersiz dosya ID")
 
-    # Find file metadata
     file_doc = await db["fs.files"].find_one({"_id": oid})
     if not file_doc:
-        raise HTTPException(404, "File not found")
+        raise HTTPException(404, "Dosya bulunamadı")
 
     content_type = (file_doc.get("metadata") or {}).get("contentType", "application/octet-stream")
     file_length  = file_doc["length"]
 
-    # Range support for video streaming
     range_header = request.headers.get("range")
     if range_header and "video" in content_type:
         range_val   = range_header.strip().replace("bytes=", "")
@@ -154,7 +151,6 @@ async def stream_media(file_id: str, request: Request):
 
         async def range_generator():
             stream = await fs.open_download_stream(oid)
-            # skip to start
             skipped = 0
             async for chunk in stream:
                 if skipped + len(chunk) <= start:
@@ -182,7 +178,6 @@ async def stream_media(file_id: str, request: Request):
             },
         )
 
-    # Full stream
     async def full_generator():
         stream = await fs.open_download_stream(oid)
         async for chunk in stream:
