@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, Animated, ImageBackground,
+  KeyboardAvoidingView, Platform, Animated,
   Dimensions, StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,7 +17,7 @@ export default function LoginScreen() {
   const [err, setErr]     = useState('');
   const [loading, setLoad] = useState(false);
 
-  // Animations
+  // Animasyonlar
   const fadeAnim  = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
@@ -29,7 +29,6 @@ export default function LoginScreen() {
       Animated.timing(slideAnim, { toValue: 0, duration: 900,  useNativeDriver: true, delay: 200 }),
     ]).start();
 
-    // Heartbeat loop
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(heartBeat, { toValue: 1.15, duration: 600, useNativeDriver: true }),
@@ -54,20 +53,36 @@ export default function LoginScreen() {
     if (!pw.trim()) return;
     setLoad(true);
     setErr('');
+    
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/login`, {
+      // 1. Önce Backend (Render) üzerinden kontrol et
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ password: pw }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Wrong password');
-      await AsyncStorage.setItem('role', data.role);
-      router.replace(data.role === 'admin' ? '/gallery' : '/gallery');
+      
+      if (res.ok) {
+        await AsyncStorage.setItem('role', data.role);
+        router.replace('/gallery');
+      } else {
+        throw new Error(data.detail || 'Hatalı şifre 💔');
+      }
     } catch (e: any) {
-      setErr(e.message);
-      setPw('');
-      shake();
+      // 2. BACKEND ÇALIŞMAZSA: Yerel (Offline) kontrolü devreye sok
+      // Bu sayede Render uykudaysa bile Esma giriş yapabilir.
+      if (pw === '280126') { // Esma'nın şifresi
+        await AsyncStorage.setItem('role', 'user');
+        router.replace('/gallery');
+      } else if (pw === 'ec280126') { // Admin şifresi
+        await AsyncStorage.setItem('role', 'admin');
+        router.replace('/gallery');
+      } else {
+        setErr('Yanlış şifre şapşal tavşan! 🐰');
+        setPw('');
+        shake();
+      }
     } finally {
       setLoad(false);
     }
@@ -77,14 +92,13 @@ export default function LoginScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Background gradient — replace ImageBackground src with your photo */}
       <LinearGradient
         colors={['#ff8fa3', '#ffb3c1', '#ffd6e0', '#fff0f3']}
         locations={[0, 0.35, 0.7, 1]}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Floating petals (decorative circles) */}
+      {/* Uçuşan dekoratif halkalar */}
       {[...Array(8)].map((_, i) => (
         <View
           key={i}
@@ -104,7 +118,6 @@ export default function LoginScreen() {
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], alignItems: 'center' }}>
 
-          {/* Heart */}
           <Animated.Text style={[styles.heart, { transform: [{ scale: heartBeat }] }]}>
             🐰
           </Animated.Text>
@@ -122,7 +135,6 @@ export default function LoginScreen() {
               placeholder="••••••"
               placeholderTextColor="#ffb3c1"
               secureTextEntry
-              keyboardType="default"
               autoCapitalize="none"
               onSubmitEditing={handleLogin}
               returnKeyType="go"

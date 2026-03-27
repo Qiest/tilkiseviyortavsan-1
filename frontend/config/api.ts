@@ -1,11 +1,8 @@
 import { Platform } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RENDER URL: Burası senin backend'inin internetteki adresidir.
-// ⚠️ Önemli: Linkin sonuna "/" koyma.
+// EN GÜNCEL RENDER URL: Uygulaman artık bu adrese bağlı.
 // ─────────────────────────────────────────────────────────────────────────────
-const RENDER_URL = 'https://sapsaltavsan-backend.onrender.com'; 
-
-export const API_BASE = RENDER_URL;
+export const API_BASE = 'https://tilkiseviyortavsan-1-2.onrender.com'; 
 
 export const mediaUrl = (fileId: string) => `${API_BASE}/api/media/${fileId}`;
