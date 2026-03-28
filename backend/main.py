@@ -130,7 +130,7 @@ async def set_status(request: Request):
         {"emoji": emoji, "text": text, "updatedAt": datetime.now(timezone.utc).isoformat()},
         upsert=True,
     )
-    sender = "Cihat" if role == "admin" else "Esma"
+    sender = "Tilki" if role == "admin" else "Tavşan"
     await send_push(
         title=f"{sender} modunu güncelledi {emoji}",
         body=text or f"Yeni mod: {emoji}",
