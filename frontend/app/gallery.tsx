@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Dimensions, RefreshControl, Modal, Image, Platform,
-  StatusBar, Animated, ScrollView,
+  StatusBar, Animated,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storage } from './_layout';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLoveCounter } from '../hooks/useLoveCounter';
 import { API_BASE, mediaUrl } from '../config/api';
@@ -117,11 +118,23 @@ function MediaViewer({ memory, onClose }: { memory: Memory | null; onClose: () =
         <TouchableOpacity style={vw.close} onPress={onClose}>
           <Text style={vw.closeText}>✕</Text>
         </TouchableOpacity>
-        <Image
-          source={{ uri: mediaUrl(memory.fileId) }}
-          style={vw.image}
-          resizeMode="contain"
-        />
+
+        {memory.fileType === 'video' ? (
+          <Video
+            source={{ uri: mediaUrl(memory.fileId) }}
+            style={vw.image}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+          />
+        ) : (
+          <Image
+            source={{ uri: mediaUrl(memory.fileId) }}
+            style={vw.image}
+            resizeMode="contain"
+          />
+        )}
+
         {!!memory.caption && (
           <View style={vw.captionBox}>
             <Text style={vw.captionText}>{memory.caption}</Text>
@@ -147,10 +160,15 @@ export default function GalleryScreen() {
 
   useEffect(() => {
     (async () => {
-      const r = await AsyncStorage.getItem('role');
-      setRole(r || 'user');
+      const r = await storage.getItem('role');
+      if (!r) {
+        // Giriş yapılmamış, login'e gönder
+        router.replace('/login');
+        return;
+      }
+      setRole(r);
+      loadMemories();
     })();
-    loadMemories();
   }, []);
 
   const loadMemories = useCallback(async () => {
@@ -167,7 +185,7 @@ export default function GalleryScreen() {
   }, []);
 
   const handleLogout = async () => {
-    await AsyncStorage.clear();
+    await storage.clear();
     router.replace('/login');
   };
 

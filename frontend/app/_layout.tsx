@@ -1,41 +1,33 @@
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, ActivityIndicator } from 'react-native';
-import { useFonts } from 'expo-font';
+import { Stack } from 'expo-router';
 
-export default function RootLayout() {
-  const router   = useRouter();
-  const segments = useSegments();
-  const [ready, setReady]   = useState(false);
-  const [role,  setRole]    = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const stored = await AsyncStorage.getItem('role');
-      setRole(stored);
-      setReady(true);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!ready) return;
-    const inAuth = segments[0] === 'login';
-    if (!role && !inAuth) {
-      router.replace('/login');
-    } else if (role && inAuth) {
-      router.replace('/gallery');
+// Web'de localStorage, native'de AsyncStorage kullan
+export const storage = {
+  getItem: async (key: string): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      return localStorage.getItem(key);
     }
-  }, [ready, role, segments]);
+    return AsyncStorage.getItem(key);
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      localStorage.setItem(key, value);
+    } else {
+      await AsyncStorage.setItem(key, value);
+    }
+  },
+  clear: async (): Promise<void> => {
+    if (Platform.OS === 'web') {
+      localStorage.clear();
+    } else {
+      await AsyncStorage.clear();
+    }
+  },
+};
 
-  if (!ready) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF0F3' }}>
-        <ActivityIndicator color="#FFC0CB" size="large" />
-      </View>
-    );
-  }
-
+// Layout sadece Stack tanımlıyor, yönlendirme her ekranda kendi içinde
+export default function RootLayout() {
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
       <Stack.Screen name="login"   options={{ gestureEnabled: false }} />

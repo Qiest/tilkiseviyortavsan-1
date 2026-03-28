@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, Platform, FlatList, Image,
+  ScrollView, Alert, Platform, Image,
   KeyboardAvoidingView, ActivityIndicator, StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storage } from './_layout';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { API_BASE, mediaUrl } from '../config/api';
@@ -30,7 +30,7 @@ export default function ManageScreen() {
 
   useEffect(() => {
     (async () => {
-      const r = await AsyncStorage.getItem('role');
+      const r = await storage.getItem('role');
       if (r !== 'admin') {
         router.replace('/gallery');
         return;
@@ -71,15 +71,22 @@ export default function ManageScreen() {
       const form = new FormData();
       const ext  = file.uri.split('.').pop() || 'jpg';
       const mime = file.type === 'video' ? `video/${ext}` : `image/${ext}`;
-      // @ts-ignore
-      form.append('file', { uri: file.uri, name: `upload.${ext}`, type: mime });
+
+      if (Platform.OS === 'web') {
+        const response = await fetch(file.uri);
+        const blob = await response.blob();
+        form.append('file', new Blob([blob], { type: mime }), `upload.${ext}`);
+      } else {
+        // @ts-ignore
+        form.append('file', { uri: file.uri, name: `upload.${ext}`, type: mime });
+      }
       form.append('caption', caption);
       form.append('date', date || new Date().toISOString());
 
+      // Content-Type header set etme - tarayici boundary otomatik ekler
       const res = await fetch(`${API_BASE}/api/memories`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'multipart/form-data' },
-        body:    form,
+        method: 'POST',
+        body:   form,
       });
       if (!res.ok) throw new Error('Upload failed');
       setFile(null);
@@ -94,21 +101,23 @@ export default function ManageScreen() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    Alert.alert('Delete memory?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          await fetch(`${API_BASE}/api/memories/${id}`, { method: 'DELETE' });
-          loadMemories();
-        },
-      },
-    ]);
+  const handleDelete = async (id: string) => {
+    // Web'de Alert çalışmıyor, confirm kullan
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Delete this memory? This cannot be undone.')
+      : await new Promise<boolean>(resolve =>
+          Alert.alert('Delete memory?', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ])
+        );
+    if (!confirmed) return;
+    await fetch(`${API_BASE}/api/memories/${id}`, { method: 'DELETE' });
+    loadMemories();
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.clear();
+    await storage.clear();
     router.replace('/login');
   };
 

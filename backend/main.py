@@ -16,7 +16,7 @@ DB_NAME         = "sapsalTavsan"
 USER_PASSWORD   = "280126"
 ADMIN_PASSWORD  = "ec280126"
 # Yıldönümü: 23 Ocak 2026
-ANNIVERSARY     = datetime(2026, 1, 23, 0, 0, 0, tzinfo=timezone.utc)
+ANNIVERSARY     = datetime(2026, 1, 28, 0, 0, 0, tzinfo=timezone.utc)
 
 # -- App & CORS -----------------------------------------------------------------
 app = FastAPI(title="Şapşal Tavşan API")

@@ -12,11 +12,26 @@
       "backgroundColor": "#FFC0CB"
     },
     "assetBundlePatterns": ["**/*"],
-    "ios": { "supportsTablet": true },
-    "android": { "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFC0CB" } },
-    "web": { "bundler": "metro", "output": "single", "favicon": "./assets/favicon.png" },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sapsaltavsan.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFC0CB"
+      },
+      "package": "com.sapsaltavsan.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
     "plugins": ["expo-router"],
     "scheme": "sapsaltavsan",
-    "experiments": { "typedRoutes": true }
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }
