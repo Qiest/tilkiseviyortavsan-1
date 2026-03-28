@@ -203,7 +203,13 @@ export default function ManageScreen() {
                 <Text style={styles.memDate}>{m.date ? new Date(m.date).toLocaleDateString('tr-TR') : ''}</Text>
                 <Text style={styles.memType}>{m.fileType}</Text>
               </View>
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(m.id)}>
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => handleDelete(m.id)}
+                activeOpacity={0.6}
+                // @ts-ignore
+                onClick={() => handleDelete(m.id)}
+              >
                 <Text style={styles.deleteText}>🗑</Text>
               </TouchableOpacity>
             </View>
