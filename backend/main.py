@@ -59,11 +59,14 @@ async def shutdown():
         client.close()
 
 # -- Push Notification Helper --------------------------------------------------
-async def send_push(title: str, body: str):
-    """Tüm kayıtlı push token'larına bildirim gönder — ikisine de gider"""
+async def send_push(title: str, body: str, exclude_role: str = None):
+    """Gönderen kişi hariç herkese bildirim gönder"""
     try:
         cursor = db.push_tokens.find()
         async for doc in cursor:
+            # Gönderen kişiyi atla
+            if exclude_role and doc.get("role") == exclude_role:
+                continue
             try:
                 webpush(
                     subscription_info=doc["subscription"],
@@ -72,7 +75,6 @@ async def send_push(title: str, body: str):
                     vapid_claims={"sub": VAPID_EMAIL},
                 )
             except WebPushException:
-                # Geçersiz token, sil
                 await db.push_tokens.delete_one({"_id": doc["_id"]})
     except Exception as e:
         print(f"Push error: {e}")
@@ -134,6 +136,7 @@ async def set_status(request: Request):
     await send_push(
         title=f"{sender} → {emoji}",
         body=text or "modunu güncelledi",
+        exclude_role=role,
     )
     return {"ok": True}
 
@@ -164,6 +167,7 @@ async def set_song(request: Request):
     await send_push(
         title=f"🎵 {sender} sana bir şarkı seçti",
         body=title or url,
+        exclude_role=role,
     )
     return {"ok": True}
 
