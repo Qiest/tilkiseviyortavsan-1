@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import asyncio
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,6 +13,7 @@ from bson import ObjectId
 import uvicorn
 from PIL import Image as PILImage
 import pillow_heif
+from pywebpush import webpush, WebPushException
 
 # HEIC desteğini aktif et
 pillow_heif.register_heif_opener()
@@ -20,10 +22,13 @@ pillow_heif.register_heif_opener()
 DB_NAME         = "sapsalTavsan"
 USER_PASSWORD   = "280126"
 ADMIN_PASSWORD  = "ec280126"
-# Yıldönümü: 23 Ocak 2026
 ANNIVERSARY     = datetime(2026, 1, 28, 0, 0, 0, tzinfo=timezone.utc)
 
-# -- App & CORS -----------------------------------------------------------------
+VAPID_PUBLIC_KEY  = "BJEoR2NdyCXSza7O8ki5fN44ZDj3WjGsjFnGiITpWy9D6ZYLx-CKGjcm2Wqwf2-Knrk3TShL80RyWBPthS2QGvI"
+VAPID_PRIVATE_KEY = "W6B3FetfUYQsOgTBXPC0KS-SAW0XYIWDHABJ3dF0Q28"
+VAPID_EMAIL       = "mailto:admin@sapsaltavsan.app"
+
+# -- App & CORS ----------------------------------------------------------------
 app = FastAPI(title="Şapşal Tavşan API")
 
 app.add_middleware(
@@ -34,7 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -- DB Helpers -----------------------------------------------------------------
+# -- DB Helpers ----------------------------------------------------------------
 client: Optional[AsyncIOMotorClient] = None
 db     = None
 fs     = None
@@ -42,12 +47,10 @@ fs     = None
 @app.on_event("startup")
 async def startup():
     global client, db, fs
-    # MongoDB Atlas Bağlantısı
     uri = "mongodb+srv://cihataksoy16_db_user:EsmaCihat2026@cihat123.nxaxw7t.mongodb.net/sapsalTavsan?retryWrites=true&w=majority&appName=Cihat123"
     client = AsyncIOMotorClient(uri)
     db     = client[DB_NAME]
     fs     = AsyncIOMotorGridFSBucket(db)
-    # Index oluşturma
     await db.memories.create_index([("date", -1)])
 
 @app.on_event("shutdown")
@@ -55,7 +58,28 @@ async def shutdown():
     if client:
         client.close()
 
-# -- Auth -----------------------------------------------------------------------
+# -- Push Notification Helper --------------------------------------------------
+async def send_push(title: str, body: str, exclude_role: str = None):
+    """Tüm kayıtlı push token'larına bildirim gönder"""
+    try:
+        cursor = db.push_tokens.find()
+        async for doc in cursor:
+            if exclude_role and doc.get("role") == exclude_role:
+                continue
+            try:
+                webpush(
+                    subscription_info=doc["subscription"],
+                    data=json.dumps({"title": title, "body": body}),
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims={"sub": VAPID_EMAIL},
+                )
+            except WebPushException:
+                # Geçersiz token, sil
+                await db.push_tokens.delete_one({"_id": doc["_id"]})
+    except Exception as e:
+        print(f"Push error: {e}")
+
+# -- Auth ----------------------------------------------------------------------
 @app.post("/api/auth/login")
 async def login(request: Request):
     body = await request.json()
@@ -63,22 +87,106 @@ async def login(request: Request):
     if password == ADMIN_PASSWORD:
         return {"role": "admin", "ok": True}
     if password == USER_PASSWORD:
-        return {"role": "user",  "ok": True}
+        return {"role": "user", "ok": True}
     raise HTTPException(status_code=401, detail="Yanlış şifre 💔")
 
-# -- Anniversary Counter --------------------------------------------------------
+# -- Push Token ----------------------------------------------------------------
+@app.post("/api/push/register")
+async def register_push(request: Request):
+    body = await request.json()
+    subscription = body.get("subscription")
+    role = body.get("role", "user")
+    if not subscription:
+        raise HTTPException(400, "subscription gerekli")
+    # Varsa güncelle, yoksa ekle
+    await db.push_tokens.update_one(
+        {"subscription.endpoint": subscription["endpoint"]},
+        {"$set": {"subscription": subscription, "role": role, "updatedAt": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+@app.get("/api/push/vapid-public-key")
+async def get_vapid_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+# -- Status (Mod) --------------------------------------------------------------
+@app.get("/api/status")
+async def get_status():
+    doc = await db.status.find_one({})
+    if not doc:
+        return {"emoji": "🐰", "text": "Seni seviyorum", "updatedAt": ""}
+    return {
+        "emoji": doc.get("emoji", "🐰"),
+        "text": doc.get("text", ""),
+        "updatedAt": doc.get("updatedAt", ""),
+    }
+
+@app.post("/api/status")
+async def set_status(request: Request):
+    body = await request.json()
+    emoji = body.get("emoji", "🐰")
+    text  = body.get("text", "")
+    role  = body.get("role", "user")
+    await db.status.replace_one(
+        {},
+        {"emoji": emoji, "text": text, "updatedAt": datetime.now(timezone.utc).isoformat()},
+        upsert=True,
+    )
+    # Karşı tarafa bildirim gönder
+    sender = "Cihat" if role == "admin" else "Esma"
+    await send_push(
+        title=f"{sender} modunu güncelledi {emoji}",
+        body=text or f"Yeni mod: {emoji}",
+        exclude_role=role,
+    )
+    return {"ok": True}
+
+# -- Song of the Day -----------------------------------------------------------
+@app.get("/api/song")
+async def get_song():
+    doc = await db.song.find_one({})
+    if not doc:
+        return {"url": "", "title": "", "updatedAt": ""}
+    return {
+        "url": doc.get("url", ""),
+        "title": doc.get("title", ""),
+        "updatedAt": doc.get("updatedAt", ""),
+    }
+
+@app.post("/api/song")
+async def set_song(request: Request):
+    body  = await request.json()
+    url   = body.get("url", "")
+    title = body.get("title", "")
+    role  = body.get("role", "user")
+    await db.song.replace_one(
+        {},
+        {"url": url, "title": title, "updatedAt": datetime.now(timezone.utc).isoformat()},
+        upsert=True,
+    )
+    sender = "Cihat" if role == "admin" else "Esma"
+    await send_push(
+        title=f"🎵 {sender} sana bir şarkı seçti!",
+        body=title or url,
+        exclude_role=role,
+    )
+    return {"ok": True}
+
+# -- Anniversary Counter -------------------------------------------------------
 @app.get("/api/anniversary")
 async def anniversary():
     now   = datetime.now(timezone.utc)
     delta = now - ANNIVERSARY
     total_seconds = int(delta.total_seconds())
-    days    = delta.days
-    hours   = (total_seconds % 86400) // 3600
-    minutes = (total_seconds % 3600)  // 60
-    seconds = total_seconds % 60
-    return {"days": days, "hours": hours, "minutes": minutes, "seconds": seconds}
+    return {
+        "days":    delta.days,
+        "hours":   (total_seconds % 86400) // 3600,
+        "minutes": (total_seconds % 3600)  // 60,
+        "seconds": total_seconds % 60,
+    }
 
-# -- Memories -------------------------------------------------------------------
+# -- Memories ------------------------------------------------------------------
 @app.get("/api/memories")
 async def list_memories():
     cursor = db.memories.find().sort("date", -1)
@@ -99,10 +207,10 @@ async def create_memory(
     caption: str        = Form(""),
     date:    str        = Form(""),
 ):
-    content   = await file.read()
-    file_type = "video" if file.content_type and "video" in file.content_type else "image"
+    content      = await file.read()
+    file_type    = "video" if file.content_type and "video" in file.content_type else "image"
     content_type = file.content_type or "image/jpeg"
-    filename = file.filename or "upload"
+    filename     = file.filename or "upload"
 
     # HEIC / HEIF dosyalarını JPEG'e çevir
     if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
@@ -122,10 +230,10 @@ async def create_memory(
         metadata={"contentType": content_type},
     )
     doc = {
-        "caption":  caption,
-        "date":     date or datetime.now(timezone.utc).isoformat(),
-        "fileId":   file_id,
-        "fileType": file_type,
+        "caption":   caption,
+        "date":      date or datetime.now(timezone.utc).isoformat(),
+        "fileId":    file_id,
+        "fileType":  file_type,
         "createdAt": datetime.now(timezone.utc),
     }
     result = await db.memories.insert_one(doc)
@@ -143,7 +251,7 @@ async def delete_memory(memory_id: str):
     await db.memories.delete_one({"_id": ObjectId(memory_id)})
     return {"ok": True}
 
-# -- Media Streaming ------------------------------------------------------------
+# -- Media Streaming -----------------------------------------------------------
 @app.get("/api/media/{file_id}")
 async def stream_media(file_id: str, request: Request):
     try:
@@ -203,6 +311,6 @@ async def stream_media(file_id: str, request: Request):
         },
     )
 
-# -- Run ------------------------------------------------------------------------
+# -- Run -----------------------------------------------------------------------
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=10000)
