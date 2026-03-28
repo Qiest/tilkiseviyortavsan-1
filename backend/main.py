@@ -10,6 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 import uvicorn
+from PIL import Image as PILImage
+import pillow_heif
+
+# HEIC desteğini aktif et
+pillow_heif.register_heif_opener()
 
 # -- Config --------------------------------------------------------------------
 DB_NAME         = "sapsalTavsan"
@@ -96,10 +101,25 @@ async def create_memory(
 ):
     content   = await file.read()
     file_type = "video" if file.content_type and "video" in file.content_type else "image"
+    content_type = file.content_type or "image/jpeg"
+    filename = file.filename or "upload"
+
+    # HEIC / HEIF dosyalarını JPEG'e çevir
+    if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
+        try:
+            img = PILImage.open(io.BytesIO(content))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=90)
+            content = buf.getvalue()
+            content_type = "image/jpeg"
+            filename = os.path.splitext(filename)[0] + ".jpg"
+        except Exception as e:
+            raise HTTPException(400, f"HEIC dönüştürme hatası: {e}")
+
     file_id = await fs.upload_from_stream(
-        file.filename,
+        filename,
         io.BytesIO(content),
-        metadata={"contentType": file.content_type},
+        metadata={"contentType": content_type},
     )
     doc = {
         "caption":  caption,
