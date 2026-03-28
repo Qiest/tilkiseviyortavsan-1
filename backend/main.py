@@ -59,13 +59,11 @@ async def shutdown():
         client.close()
 
 # -- Push Notification Helper --------------------------------------------------
-async def send_push(title: str, body: str, exclude_role: str = None):
-    """Tüm kayıtlı push token'larına bildirim gönder"""
+async def send_push(title: str, body: str):
+    """Tüm kayıtlı push token'larına bildirim gönder — ikisine de gider"""
     try:
         cursor = db.push_tokens.find()
         async for doc in cursor:
-            if exclude_role and doc.get("role") == exclude_role:
-                continue
             try:
                 webpush(
                     subscription_info=doc["subscription"],
@@ -98,7 +96,6 @@ async def register_push(request: Request):
     role = body.get("role", "user")
     if not subscription:
         raise HTTPException(400, "subscription gerekli")
-    # Varsa güncelle, yoksa ekle
     await db.push_tokens.update_one(
         {"subscription.endpoint": subscription["endpoint"]},
         {"$set": {"subscription": subscription, "role": role, "updatedAt": datetime.now(timezone.utc)}},
@@ -124,7 +121,7 @@ async def get_status():
 
 @app.post("/api/status")
 async def set_status(request: Request):
-    body = await request.json()
+    body  = await request.json()
     emoji = body.get("emoji", "🐰")
     text  = body.get("text", "")
     role  = body.get("role", "user")
@@ -133,12 +130,10 @@ async def set_status(request: Request):
         {"emoji": emoji, "text": text, "updatedAt": datetime.now(timezone.utc).isoformat()},
         upsert=True,
     )
-    # Karşı tarafa bildirim gönder
     sender = "Cihat" if role == "admin" else "Esma"
     await send_push(
         title=f"{sender} modunu güncelledi {emoji}",
         body=text or f"Yeni mod: {emoji}",
-        exclude_role=role,
     )
     return {"ok": True}
 
@@ -167,9 +162,8 @@ async def set_song(request: Request):
     )
     sender = "Cihat" if role == "admin" else "Esma"
     await send_push(
-        title=f"🎵 {sender} sana bir şarkı seçti!",
+        title=f"🎵 {sender} günün şarkısını seçti!",
         body=title or url,
-        exclude_role=role,
     )
     return {"ok": True}
 
@@ -212,7 +206,6 @@ async def create_memory(
     content_type = file.content_type or "image/jpeg"
     filename     = file.filename or "upload"
 
-    # HEIC / HEIF dosyalarını JPEG'e çevir
     if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
         try:
             img = PILImage.open(io.BytesIO(content))
