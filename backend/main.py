@@ -59,11 +59,13 @@ async def shutdown():
         client.close()
 
 # -- Push Notification Helper --------------------------------------------------
-async def send_push(title: str, body: str):
-    """Tüm kayıtlı push token'larına bildirim gönder — ikisine de gider"""
+async def send_push(title: str, body: str, exclude_role: str = None):
+    """Gönderen kişi hariç herkese bildirim gönder"""
     try:
         cursor = db.push_tokens.find()
         async for doc in cursor:
+            if exclude_role and doc.get("role") == exclude_role:
+                continue
             try:
                 webpush(
                     subscription_info=doc["subscription"],
@@ -72,7 +74,6 @@ async def send_push(title: str, body: str):
                     vapid_claims={"sub": VAPID_EMAIL},
                 )
             except WebPushException:
-                # Geçersiz token, sil
                 await db.push_tokens.delete_one({"_id": doc["_id"]})
     except Exception as e:
         print(f"Push error: {e}")
@@ -155,6 +156,7 @@ async def set_status(request: Request):
     await send_push(
         title=f"{sender} → {emoji}",
         body=text or "modunu güncelledi",
+        exclude_role=role,
     )
     return {"ok": True}
 
@@ -185,6 +187,7 @@ async def set_song(request: Request):
     await send_push(
         title=f"🎵 {sender} sana bir şarkı seçti",
         body=title or url,
+        exclude_role=role,
     )
     return {"ok": True}
 
@@ -324,6 +327,92 @@ async def stream_media(file_id: str, request: Request):
             "Content-Length": str(file_length),
         },
     )
+
+# -- Comments -----------------------------------------------------------------
+@app.get("/api/memories/{memory_id}/comments")
+async def get_comments(memory_id: str):
+    cursor = db.comments.find({"memoryId": memory_id}).sort("createdAt", 1)
+    comments = []
+    async for doc in cursor:
+        comments.append({
+            "id":        str(doc["_id"]),
+            "text":      doc.get("text", ""),
+            "role":      doc.get("role", "user"),
+            "createdAt": doc["createdAt"].strftime("%d.%m.%Y %H:%M") if hasattr(doc.get("createdAt"), "strftime") else "",
+        })
+    return comments
+
+@app.post("/api/memories/{memory_id}/comments")
+async def add_comment(memory_id: str, request: Request):
+    body = await request.json()
+    text = body.get("text", "").strip()
+    role = body.get("role", "user")
+    if not text:
+        raise HTTPException(400, "Yorum boş olamaz")
+    doc = {
+        "memoryId":  memory_id,
+        "text":      text,
+        "role":      role,
+        "createdAt": datetime.now(timezone.utc),
+    }
+    result = await db.comments.insert_one(doc)
+    sender = "Tilki 🦊" if role == "admin" else "Tavşan 🐰"
+    await send_push(
+        title=f"💬 {sender} yorum yaptı",
+        body=text[:60],
+        exclude_role=role,
+    )
+    return {"id": str(result.inserted_id), "ok": True}
+
+@app.delete("/api/memories/{memory_id}/comments/{comment_id}")
+async def delete_comment(memory_id: str, comment_id: str):
+    await db.comments.delete_one({"_id": ObjectId(comment_id)})
+    return {"ok": True}
+
+# -- User Upload (Esma da yükleyebilsin) ---------------------------------------
+@app.post("/api/user/memories")
+async def create_memory_user(
+    file:    UploadFile = File(...),
+    caption: str        = Form(""),
+    date:    str        = Form(""),
+):
+    """User (Esma) da fotoğraf yükleyebilsin"""
+    content      = await file.read()
+    file_type    = "video" if file.content_type and "video" in file.content_type else "image"
+    content_type = file.content_type or "image/jpeg"
+    filename     = file.filename or "upload"
+
+    if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
+        try:
+            img = PILImage.open(io.BytesIO(content))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=90)
+            content = buf.getvalue()
+            content_type = "image/jpeg"
+            filename = os.path.splitext(filename)[0] + ".jpg"
+        except Exception as e:
+            raise HTTPException(400, f"HEIC dönüştürme hatası: {e}")
+
+    file_id = await fs.upload_from_stream(
+        filename,
+        io.BytesIO(content),
+        metadata={"contentType": content_type},
+    )
+    doc = {
+        "caption":   caption,
+        "date":      date or datetime.now(timezone.utc).isoformat(),
+        "fileId":    file_id,
+        "fileType":  file_type,
+        "createdAt": datetime.now(timezone.utc),
+        "uploadedBy": "user",
+    }
+    result = await db.memories.insert_one(doc)
+    await send_push(
+        title="🐰 Tavşan yeni bir anı ekledi!",
+        body=caption or "Yeni bir fotoğraf yüklendi",
+        exclude_role="user",
+    )
+    return {"id": str(result.inserted_id), "ok": True}
 
 # -- Run -----------------------------------------------------------------------
 if __name__ == "__main__":
