@@ -22,7 +22,7 @@ pillow_heif.register_heif_opener()
 
 # Cloudinary config
 cloudinary.config(
-    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME", "tavsanci"),
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME", "dpmbmsov6"),
     api_key    = os.environ.get("CLOUDINARY_API_KEY"),
     api_secret = os.environ.get("CLOUDINARY_API_SECRET"),
 )
