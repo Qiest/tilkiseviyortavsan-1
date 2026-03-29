@@ -59,14 +59,11 @@ async def shutdown():
         client.close()
 
 # -- Push Notification Helper --------------------------------------------------
-async def send_push(title: str, body: str, exclude_role: str = None):
-    """Gönderen kişi hariç herkese bildirim gönder"""
+async def send_push(title: str, body: str):
+    """Tüm kayıtlı push token'larına bildirim gönder — ikisine de gider"""
     try:
         cursor = db.push_tokens.find()
         async for doc in cursor:
-            # Gönderen kişiyi atla
-            if exclude_role and doc.get("role") == exclude_role:
-                continue
             try:
                 webpush(
                     subscription_info=doc["subscription"],
@@ -75,6 +72,7 @@ async def send_push(title: str, body: str, exclude_role: str = None):
                     vapid_claims={"sub": VAPID_EMAIL},
                 )
             except WebPushException:
+                # Geçersiz token, sil
                 await db.push_tokens.delete_one({"_id": doc["_id"]})
     except Exception as e:
         print(f"Push error: {e}")
@@ -84,11 +82,32 @@ async def send_push(title: str, body: str, exclude_role: str = None):
 async def login(request: Request):
     body = await request.json()
     password = body.get("password", "")
+    now = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M")
+    client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?")
     if password == ADMIN_PASSWORD:
+        print(f"🦊 Admin girişi — {now} — {client_ip}")
+        # Login kaydını veritabanına yaz
+        await db.logins.insert_one({"role": "admin", "ip": client_ip, "time": datetime.now(timezone.utc)})
         return {"role": "admin", "ok": True}
     if password == USER_PASSWORD:
+        print(f"🐰 User girişi — {now} — {client_ip}")
+        await db.logins.insert_one({"role": "user", "ip": client_ip, "time": datetime.now(timezone.utc)})
         return {"role": "user", "ok": True}
+    print(f"❌ Hatalı şifre — {now} — {client_ip}")
     raise HTTPException(status_code=401, detail="Yanlış şifre 💔")
+
+@app.get("/api/admin/logins")
+async def get_logins():
+    """Son 20 girişi göster — bu URL'i sadece sen bil"""
+    cursor = db.logins.find().sort("time", -1).limit(20)
+    result = []
+    async for doc in cursor:
+        result.append({
+            "role": doc["role"],
+            "ip":   doc["ip"],
+            "time": doc["time"].strftime("%d.%m.%Y %H:%M") if hasattr(doc["time"], "strftime") else str(doc["time"]),
+        })
+    return result
 
 # -- Push Token ----------------------------------------------------------------
 @app.post("/api/push/register")
@@ -136,7 +155,6 @@ async def set_status(request: Request):
     await send_push(
         title=f"{sender} → {emoji}",
         body=text or "modunu güncelledi",
-        exclude_role=role,
     )
     return {"ok": True}
 
@@ -167,7 +185,6 @@ async def set_song(request: Request):
     await send_push(
         title=f"🎵 {sender} sana bir şarkı seçti",
         body=title or url,
-        exclude_role=role,
     )
     return {"ok": True}
 
