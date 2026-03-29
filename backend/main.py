@@ -14,9 +14,18 @@ import uvicorn
 from PIL import Image as PILImage
 import pillow_heif
 from pywebpush import webpush, WebPushException
+import cloudinary
+import cloudinary.uploader
 
 # HEIC desteğini aktif et
 pillow_heif.register_heif_opener()
+
+# Cloudinary config
+cloudinary.config(
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME", "tavsanci"),
+    api_key    = os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret = os.environ.get("CLOUDINARY_API_SECRET"),
+)
 
 # -- Config --------------------------------------------------------------------
 DB_NAME         = "sapsalTavsan"
@@ -210,11 +219,15 @@ async def list_memories():
     cursor = db.memories.find().sort("date", -1)
     memories = []
     async for doc in cursor:
+        # Cloudinary URL varsa onu kullan, yoksa eski GridFS fileId ile
+        file_id = str(doc.get("fileId", ""))
+        media_url = doc.get("mediaUrl") or (f"/api/media/{file_id}" if file_id else "")
         memories.append({
             "id":       str(doc["_id"]),
             "caption":  doc.get("caption", ""),
             "date":     doc.get("date", ""),
-            "fileId":   str(doc.get("fileId", "")),
+            "fileId":   file_id,
+            "mediaUrl": media_url,
             "fileType": doc.get("fileType", "image"),
         })
     return memories
@@ -225,31 +238,38 @@ async def create_memory(
     caption: str        = Form(""),
     date:    str        = Form(""),
 ):
-    content      = await file.read()
+    data         = await file.read()
     file_type    = "video" if file.content_type and "video" in file.content_type else "image"
     content_type = file.content_type or "image/jpeg"
     filename     = file.filename or "upload"
 
+    # HEIC → JPEG dönüştür
     if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
         try:
-            img = PILImage.open(io.BytesIO(content))
+            img = PILImage.open(io.BytesIO(data))
             buf = io.BytesIO()
             img.convert("RGB").save(buf, format="JPEG", quality=90)
-            content = buf.getvalue()
+            data = buf.getvalue()
             content_type = "image/jpeg"
-            filename = os.path.splitext(filename)[0] + ".jpg"
+            file_type = "image"
         except Exception as e:
             raise HTTPException(400, f"HEIC dönüştürme hatası: {e}")
 
-    file_id = await fs.upload_from_stream(
-        filename,
-        io.BytesIO(content),
-        metadata={"contentType": content_type},
+    # Cloudinary'e yükle
+    resource_type = "video" if file_type == "video" else "image"
+    upload_result = cloudinary.uploader.upload(
+        data,
+        resource_type=resource_type,
+        folder="sapsaltavsan",
     )
+    media_url = upload_result["secure_url"]
+    public_id = upload_result["public_id"]
+
     doc = {
         "caption":   caption,
         "date":      date or datetime.now(timezone.utc).isoformat(),
-        "fileId":    file_id,
+        "mediaUrl":  media_url,
+        "publicId":  public_id,
         "fileType":  file_type,
         "createdAt": datetime.now(timezone.utc),
     }
@@ -261,10 +281,19 @@ async def delete_memory(memory_id: str):
     doc = await db.memories.find_one({"_id": ObjectId(memory_id)})
     if not doc:
         raise HTTPException(404, "Anı bulunamadı")
-    try:
-        await fs.delete(doc["fileId"])
-    except Exception:
-        pass
+    # Cloudinary'den sil
+    if doc.get("publicId"):
+        try:
+            resource_type = "video" if doc.get("fileType") == "video" else "image"
+            cloudinary.uploader.destroy(doc["publicId"], resource_type=resource_type)
+        except Exception:
+            pass
+    # GridFS'ten sil (eski kayıtlar için)
+    if doc.get("fileId"):
+        try:
+            await fs.delete(doc["fileId"])
+        except Exception:
+            pass
     await db.memories.delete_one({"_id": ObjectId(memory_id)})
     return {"ok": True}
 
@@ -377,33 +406,34 @@ async def create_memory_user(
     date:    str        = Form(""),
 ):
     """User (Esma) da fotoğraf yükleyebilsin"""
-    content      = await file.read()
+    data         = await file.read()
     file_type    = "video" if file.content_type and "video" in file.content_type else "image"
     content_type = file.content_type or "image/jpeg"
     filename     = file.filename or "upload"
 
     if content_type in ("image/heic", "image/heif") or filename.lower().endswith((".heic", ".heif")):
         try:
-            img = PILImage.open(io.BytesIO(content))
+            img = PILImage.open(io.BytesIO(data))
             buf = io.BytesIO()
             img.convert("RGB").save(buf, format="JPEG", quality=90)
-            content = buf.getvalue()
-            content_type = "image/jpeg"
-            filename = os.path.splitext(filename)[0] + ".jpg"
+            data = buf.getvalue()
+            file_type = "image"
         except Exception as e:
             raise HTTPException(400, f"HEIC dönüştürme hatası: {e}")
 
-    file_id = await fs.upload_from_stream(
-        filename,
-        io.BytesIO(content),
-        metadata={"contentType": content_type},
+    resource_type = "video" if file_type == "video" else "image"
+    upload_result = cloudinary.uploader.upload(
+        data,
+        resource_type=resource_type,
+        folder="sapsaltavsan",
     )
     doc = {
-        "caption":   caption,
-        "date":      date or datetime.now(timezone.utc).isoformat(),
-        "fileId":    file_id,
-        "fileType":  file_type,
-        "createdAt": datetime.now(timezone.utc),
+        "caption":    caption,
+        "date":       date or datetime.now(timezone.utc).isoformat(),
+        "mediaUrl":   upload_result["secure_url"],
+        "publicId":   upload_result["public_id"],
+        "fileType":   file_type,
+        "createdAt":  datetime.now(timezone.utc),
         "uploadedBy": "user",
     }
     result = await db.memories.insert_one(doc)
